@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>分享UID解析</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --text: #1b1f24;
+    --muted: #66707a;
+    --line: #e3e6ea;
+    --accent: #d64545;
+    --accent-ink: #ffffff;
+    --ok: #1f7a4d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171a;
+      --card: #1d2126;
+      --text: #e8eaed;
+      --muted: #9aa4ae;
+      --line: #2c3238;
+      --accent: #e05757;
+      --accent-ink: #ffffff;
+      --ok: #5fbf8f;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    padding: 20px 16px 40px;
+  }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 8px 0 4px; letter-spacing: .3px; }
+  .sub { margin: 0 0 18px; color: var(--muted); font-size: 14px; }
+  label { display: block; font-size: 14px; color: var(--muted); margin-bottom: 6px; }
+  textarea {
+    width: 100%;
+    min-height: 110px;
+    resize: vertical;
+    padding: 12px;
+    font: inherit;
+    color: var(--text);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    outline: none;
+  }
+  textarea:focus { border-color: var(--accent); }
+  .row { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+  button {
+    appearance: none;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: var(--accent-ink);
+    font: inherit;
+    font-size: 15px;
+    padding: 9px 18px;
+    border-radius: 9px;
+    cursor: pointer;
+  }
+  button.ghost { background: transparent; color: var(--text); border-color: var(--line); }
+  button:active { transform: translateY(1px); }
+  #status { min-height: 24px; margin: 12px 0 4px; font-size: 14px; color: var(--muted); }
+  #status.ok { color: var(--ok); }
+  #results { list-style: none; margin: 8px 0 0; padding: 0; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-top: 12px;
+  }
+  .uid {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 19px;
+    letter-spacing: .4px;
+    word-break: break-all;
+    user-select: all;
+  }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 4px; word-break: break-all; }
+  details { margin-top: 28px; color: var(--muted); font-size: 14px; }
+  summary { cursor: pointer; color: var(--text); }
+  details p { margin: 8px 0; }
+  footer { max-width: 640px; margin: 26px auto 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+  footer a { color: inherit; }
+  @media (max-width: 380px) { button { flex: 1 1 0; padding: 9px 8px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>分享UID解析</h1>
+  <p class="sub">从小红书分享链接里还原分享者的 uid · 全部在浏览器本地计算，不上传任何数据</p>
+
+  <label for="input">粘贴链接或分享文案</label>
+  <textarea id="input" placeholder="https://www.xiaohongshu.com/... 或整段分享文案" autocomplete="off" spellcheck="false"></textarea>
+
+  <div class="row">
+    <button id="parse" type="button">解析</button>
+    <button id="paste" type="button" class="ghost">粘贴</button>
+    <button id="clear" type="button" class="ghost">清空</button>
+  </div>
+
+  <div id="status" role="status" aria-live="polite"></div>
+  <ul id="results"></ul>
+
+  <details>
+    <summary>支持的链接与限制</summary>
+    <p>支持链接里带 <code>shareRedId</code>（微信/App 分享）或 <code>appuid</code>（普通分享短链跳转后）的情况，也支持 <code>/404/sec_xxx?originalUrl=…</code> 这种把原始地址藏在参数里的页面。</p>
+    <p>不支持 <code>xhslink.com</code> 短链：浏览器无法跨域读取跳转后的地址。请先在浏览器打开短链，再复制地址栏里的长链接。</p>
+    <p>还原的是<strong>最初分享者</strong>的 uid；转发不会改变它。uid 不等于小红书号，但可拼成 <code>xiaohongshu.com/user/profile/&lt;uid&gt;</code> 打开主页。</p>
+  </details>
+</main>
+
+<footer>
+  <p>本页仅为独立实现的本地工具，与小红书官方无关。</p>
+  <p>用途边界：检查自己发出的链接、或确认别人发来的链接携带了谁的标识。版本 <span id="ver">1.0.0</span></p>
+</footer>
+
+<script src="shareuid.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var input = document.getElementById("input");
+  var statusEl = document.getElementById("status");
+  var list = document.getElementById("results");
+
+  function setStatus(msg, ok) {
+    statusEl.textContent = msg;
+    statusEl.className = ok ? "ok" : "";
+  }
+
+  function clearList() {
+    while (list.firstChild) list.removeChild(list.firstChild);
+  }
+
+  function copyText(text, btn) {
+    function done(ok) {
+      if (btn) btn.textContent = ok ? "已复制" : "复制失败";
+      if (btn) setTimeout(function () { btn.textContent = "复制 UID"; }, 1500);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+      return;
+    }
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    done(ok);
+  }
+
+  function render(uids) {
+    clearList();
+    uids.forEach(function (r) {
+      var li = document.createElement("li");
+      li.className = "card";
+
+      var uidEl = document.createElement("div");
+      uidEl.className = "uid";
+      uidEl.textContent = r.uid;
+
+      var meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = "来源字段：" + r.field;
+
+      var actions = document.createElement("div");
+      actions.className = "row";
+
+      var copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.textContent = "复制 UID";
+      copyBtn.addEventListener("click", function () { copyText(r.uid, copyBtn); });
+
+      var openBtn = document.createElement("button");
+      openBtn.type = "button";
+      openBtn.className = "ghost";
+      openBtn.textContent = "打开主页";
+      openBtn.addEventListener("click", function () {
+        window.open(r.profileUrl, "_blank", "noopener,noreferrer");
+      });
+
+      actions.appendChild(copyBtn);
+      actions.appendChild(openBtn);
+      li.appendChild(uidEl);
+      li.appendChild(meta);
+      li.appendChild(actions);
+      list.appendChild(li);
+    });
+  }
+
+  function parse() {
+    var text = input.value;
+    if (!text.trim()) {
+      clearList();
+      setStatus("先粘贴一条链接或分享文案。");
+      return;
+    }
+    var out = ShareUid.extract(text);
+    if (out.uids.length) {
+      render(out.uids);
+      setStatus("找到 " + out.uids.length + " 个 uid。");
+    } else {
+      clearList();
+      if (out.errors.length) {
+        setStatus("链接里的身份字段无法还原：" + out.errors[0].error);
+      } else {
+        setStatus("没有找到可还原的 uid。短链需要先在浏览器打开，再复制跳转后的长链接。");
+      }
+    }
+  }
+
+  document.getElementById("parse").addEventListener("click", parse);
+
+  document.getElementById("paste").addEventListener("click", function () {
+    if (!navigator.clipboard || !navigator.clipboard.readText) {
+      setStatus("当前浏览器不支持读取剪贴板，请长按输入框手动粘贴。");
+      return;
+    }
+    navigator.clipboard.readText().then(function (text) {
+      input.value = text;
+      parse();
+    }, function () {
+      setStatus("读取剪贴板被拒绝，请长按输入框手动粘贴。");
+    });
+  });
+
+  document.getElementById("clear").addEventListener("click", function () {
+    input.value = "";
+    clearList();
+    setStatus("");
+    input.focus();
+  });
+
+  input.addEventListener("paste", function () {
+    setTimeout(parse, 50);
+  });
+
+  input.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      parse();
+    }
+  });
+
+  document.getElementById("ver").textContent = ShareUid.version;
+})();
+</script>
+</body>
+</html>
